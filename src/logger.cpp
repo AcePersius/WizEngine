@@ -15,6 +15,20 @@ void initLogger(std::string const filepath)
     {
         std::cerr << "Failed to initialize Logger";
     }
+    int version = SDL_GetVersion();
+    std::string SDL_Version = "SDL version: " + std::to_string(SDL_VERSIONNUM_MAJOR(version)) + "." + 
+    std::to_string(SDL_VERSIONNUM_MINOR(version)) + "." + std::to_string(SDL_VERSIONNUM_MICRO(version));
+    
+    Logger(logLevel::Info, SDL_Version);
+
+    uint32_t vulkanVersion = VK_API_VERSION_1_0;
+    VkResult result = vkEnumerateInstanceVersion(&vulkanVersion);
+
+    if (result == VK_SUCCESS)
+    {Logger(logLevel::Info, "Vulkan API Version: " + std::to_string(VK_API_VERSION_MAJOR(vulkanVersion)) + "." +
+    std::to_string(VK_API_VERSION_MINOR(vulkanVersion)) + "." + std::to_string(VK_API_VERSION_PATCH(vulkanVersion)) + '\n');}
+    else
+    {Logger(logLevel::Error, "Failed to query Vulkan version.\n");}
 }
 
 std::string logLevelString(logLevel level)

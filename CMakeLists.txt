@@ -1,81 +1,268 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(WizEngine)
+project(WizEngine LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include(FetchContent)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_package(SDL3 CONFIG REQUIRED)
 
-# Tell vk-bootstrap to use the Vulkan-Headers revision
-# that matches its own source.
-set(
-    VK_BOOTSTRAP_FORCE_FETCH_CONTENT
-    ON
-    CACHE BOOL ""
-    FORCE
-)
+# ---------------------------------------------------------
+# Vulkan SDK
+# ---------------------------------------------------------
 
-FetchContent_Declare(
-    fastgltf
-    GIT_REPOSITORY https://github.com/spnda/fastgltf.git
-    GIT_TAG v0.9.0
+# WizEngine currently uses components provided by the
+# locally installed LunarG Vulkan SDK, including Slang,
+# GLM, and VMA.
+#
+# The Vulkan SDK installer sets the VULKAN_SDK
+# environment variable automatically.
+
+if(NOT DEFINED ENV{VULKAN_SDK} OR "$ENV{VULKAN_SDK}" STREQUAL "")
+    message(FATAL_ERROR
+        "VULKAN_SDK environment variable is not set. "
+        "Install or configure the LunarG Vulkan SDK."
     )
-# VkBootstrap
-FetchContent_Declare(
-    vk_bootstrap
-    GIT_REPOSITORY https://github.com/charles-lunarg/vk-bootstrap.git
-    GIT_TAG 94e717e
+endif()
+
+
+# ---------------------------------------------------------
+# tinygltf
+# ---------------------------------------------------------
+
+set_source_files_properties(
+    external/tinygltf/tiny_gltf_v3.c
+    PROPERTIES
+        COMPILE_DEFINITIONS TINYGLTF3_ENABLE_FS
 )
 
-# Vulkan Memory Allocator
-FetchContent_Declare(
-    vma
-    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
-    GIT_TAG v3.4.0
+
+# ---------------------------------------------------------
+# Slang shaders
+# ---------------------------------------------------------
+
+# Graphics shader
+set(GRAPHICS_SHADER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/graphics.slang"
 )
 
-# GLM
-FetchContent_Declare(
-    glm
-    GIT_REPOSITORY https://github.com/g-truc/glm.git
-    GIT_TAG 1.0.3
+set(GRAPHICS_SHADER_OUTPUT
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/graphics.spv"
 )
 
-FetchContent_MakeAvailable(
-    vk_bootstrap
-    vma
-    glm
-    fastgltf
+
+# Compute shader
+set(COMPUTE_SHADER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute.slang"
 )
+
+set(COMPUTE_SHADER_OUTPUT
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute.spv"
+)
+
+
+# Particle shader
+set(PARTICLE_SHADER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/particle.slang"
+)
+
+set(PARTICLE_SHADER_OUTPUT
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/particle.spv"
+)
+
+
+# ---------------------------------------------------------
+# System-installed dependencies
+# ---------------------------------------------------------
 
 find_package(Vulkan REQUIRED)
+find_package(SDL3 CONFIG REQUIRED)
 
-add_executable(WizEngine
+
+# Find the Slang compiler supplied by the Vulkan SDK.
+#
+# find_program() also searches normal system PATH locations,
+# while the HINTS explicitly point it toward the Vulkan SDK.
+
+find_program(
+    SLANGC_EXECUTABLE
+
+    NAMES
+        slangc
+        slangc.exe
+
+    HINTS
+        "$ENV{VULKAN_SDK}/Bin"
+        "$ENV{VULKAN_SDK}/bin"
+
+    REQUIRED
+)
+
+
+# ---------------------------------------------------------
+# Compile graphics shader
+# ---------------------------------------------------------
+
+add_custom_command(
+    OUTPUT "${GRAPHICS_SHADER_OUTPUT}"
+
+    COMMAND "${SLANGC_EXECUTABLE}"
+        "${GRAPHICS_SHADER_SOURCE}"
+        -target spirv
+        -profile spirv_1_4
+        -emit-spirv-directly
+        -fvk-use-entrypoint-name
+        -entry vertMain
+        -entry fragMain
+        -o "${GRAPHICS_SHADER_OUTPUT}"
+
+    DEPENDS
+        "${GRAPHICS_SHADER_SOURCE}"
+
+    COMMENT
+        "Compiling graphics.slang to graphics.spv"
+
+    VERBATIM
+)
+
+
+# ---------------------------------------------------------
+# Compile compute shader
+# ---------------------------------------------------------
+
+add_custom_command(
+    OUTPUT "${COMPUTE_SHADER_OUTPUT}"
+
+    COMMAND "${SLANGC_EXECUTABLE}"
+        "${COMPUTE_SHADER_SOURCE}"
+        -target spirv
+        -profile spirv_1_4
+        -emit-spirv-directly
+        -fvk-use-entrypoint-name
+        -entry compMain
+        -o "${COMPUTE_SHADER_OUTPUT}"
+
+    DEPENDS
+        "${COMPUTE_SHADER_SOURCE}"
+
+    COMMENT
+        "Compiling compute.slang to compute.spv"
+
+    VERBATIM
+)
+
+
+# ---------------------------------------------------------
+# Compile particle shader
+# ---------------------------------------------------------
+
+add_custom_command(
+    OUTPUT "${PARTICLE_SHADER_OUTPUT}"
+
+    COMMAND "${SLANGC_EXECUTABLE}"
+        "${PARTICLE_SHADER_SOURCE}"
+        -target spirv
+        -profile spirv_1_4
+        -emit-spirv-directly
+        -fvk-use-entrypoint-name
+        -entry particleVertMain
+        -entry particleFragMain
+        -o "${PARTICLE_SHADER_OUTPUT}"
+
+    DEPENDS
+        "${PARTICLE_SHADER_SOURCE}"
+
+    COMMENT
+        "Compiling particle.slang to particle.spv"
+
+    VERBATIM
+)
+
+
+# Compile all shaders when this target is built.
+add_custom_target(
+    compile_shaders
+
+    DEPENDS
+        "${GRAPHICS_SHADER_OUTPUT}"
+        "${COMPUTE_SHADER_OUTPUT}"
+        "${PARTICLE_SHADER_OUTPUT}"
+)
+
+
+# ---------------------------------------------------------
+# WizEngine executable
+# ---------------------------------------------------------
+
+add_executable(
+    WizEngine
+
     src/main.cpp
-    src/vulkanRender.cpp
-    src/softwareRender.cpp
-    src/structsANDoperators.cpp
+    src/vk_engine.cpp
+    src/vk_device.cpp
+    src/stb_image.cpp
     src/logger.cpp
-    src/gltfLoader.cpp
-    src/objLoader.cpp
-    src/textsystem.cpp
-    src/perfANDmonitoring.cpp
-    src/mouseANDkeyboard.cpp
+
+    external/tinyobj/tiny_obj_loader.cpp
+    external/tinygltf/tiny_gltf_v3.c
 )
 
-target_link_libraries(WizEngine 
-PRIVATE 
-    Vulkan::Vulkan
-    vk-bootstrap::vk-bootstrap
-    SDL3::SDL3
-    GPUOpen::VulkanMemoryAllocator
-    glm::glm
-    fastgltf::fastgltf
+add_dependencies(
+    WizEngine
+    compile_shaders
 )
 
-target_include_directories(WizEngine PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+
+# ---------------------------------------------------------
+# Include directories
+# ---------------------------------------------------------
+
+target_include_directories(
+    WizEngine
+
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+
+        # Vendored dependencies
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/stb
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/tinyobj
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/tinygltf
+
+        # Vulkan SDK
+        #
+        # Provides Vulkan headers and installed SDK components
+        # such as GLM.
+        "$ENV{VULKAN_SDK}/Include"
+
+        # Allows:
+        # #include <vk_mem_alloc.h>
+        "$ENV{VULKAN_SDK}/Include/vma"
+)
+
+
+# ---------------------------------------------------------
+# KTX
+# ---------------------------------------------------------
+
+set(BUILD_SHARED_LIBS OFF)
+
+add_subdirectory(
+    external/KTX-Software/lib
+    ktx
+)
+
+
+# ---------------------------------------------------------
+# Libraries
+# ---------------------------------------------------------
+
+target_link_libraries(
+    WizEngine
+
+    PRIVATE
+        Vulkan::Vulkan
+        SDL3::SDL3
+        ktx
 )

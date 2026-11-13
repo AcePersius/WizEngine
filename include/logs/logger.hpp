@@ -1,6 +1,8 @@
 #ifndef LOGGER_HPP
 #define LOGGER_HPP
 
+#include <SDL3/SDL.h>
+#include <vulkan/vulkan.h>
 #include <string>
 
 enum struct logLevel{
